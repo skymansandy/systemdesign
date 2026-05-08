@@ -6,8 +6,8 @@ A collection of system design case studies written as **interview walk-throughs*
 
 | Topic | Generic | Mobile |
 |-------|---------|--------|
-| **Chat Application** | [Backend & Distributed](chat-app/generic.md) | [Client Architecture](chat-app/mobile.md) |
-| **News Feed** | [Backend & Distributed](news-feed/generic.md) | — |
+| **Chat Application** | [Backend & Distributed](social-media/chat-app/generic.md) | [Client Architecture](social-media/chat-app/mobile.md) |
+| **News Feed** | [Backend & Distributed](social-media/news-feed/generic.md) | — |
 
 !!! note "Topic Layout"
     Each topic has its own folder. Topics that span both backend and mobile have two documents — `generic.md` and `mobile.md` — with cross-references linking the two perspectives.

@@ -15,11 +15,45 @@ Sandybox System Design is a dedicated system design interview prep knowledge bas
 
 All content lives in `designs/` as Markdown files, organized **by topic**. The navigation tree is **manually defined** in `mkdocs.yml` under `nav:` — new pages must be added there to appear in the site.
 
-Each topic gets its own folder under `designs/`:
-- `designs/chat-app/` — Chat Application
-- `designs/news-feed/` — News Feed
+```
+designs/
+├── index.md                          # Home page
+├── home/
+│   ├── best-practices/index.md       # Interview best practices
+│   ├── building-blocks/index.md      # Reusable architectural components
+│   ├── tech-tradeoffs/index.md       # Technology comparison tables
+│   └── platform-fundamentals/index.md # Android/iOS platform constraints
+├── social-media/
+│   ├── chat-app/          (generic + mobile)
+│   ├── news-feed/         (generic + mobile)
+│   ├── instagram/         (mobile)
+│   ├── video-streaming/   (mobile)
+│   └── multimedia-feed/   (mobile)
+├── e-commerce-payments/
+│   ├── e-commerce/        (mobile)
+│   ├── mobile-payment/    (generic + mobile)
+│   ├── stock-broking/     (generic + mobile)
+│   └── hotel-reservation/ (generic + mobile)
+├── productivity-location/
+│   ├── offline-document-editor/ (mobile)
+│   ├── location-based-app/     (mobile)
+│   └── search-autocomplete/    (mobile)
+├── education-testing/
+│   ├── live-class/   (mobile)
+│   └── test-taking/  (mobile)
+└── infrastructure-sdks/
+    ├── image-loading/        (mobile)
+    ├── file-download-manager/(mobile)
+    ├── network-layer/        (mobile)
+    ├── push-notification/    (mobile)
+    ├── analytics-sdk/        (mobile)
+    ├── feature-flags/        (mobile)
+    ├── design-system/        (mobile)
+    ├── app-update-migration/ (mobile)
+    └── pagination-library/   (mobile)
+```
 
-Inside each folder:
+Inside each topic folder:
 - `generic.md` — Backend/distributed-systems perspective
 - `mobile.md` — Mobile client architecture perspective
 - Some topics may only have one of the two

@@ -45,67 +45,68 @@ docs_dir: designs
 nav:
   - Home:
     - index.md
+    - Best Practices: home/best-practices/index.md
+    - Common Building Blocks: home/building-blocks/index.md
+    - Technology Trade-offs: home/tech-tradeoffs/index.md
+    - Platform Fundamentals: home/platform-fundamentals/index.md
 
   - Social & Media:
     - Chat Application:
-      - chat-app/generic.md
-      - chat-app/mobile.md
+      - social-media/chat-app/generic.md
+      - social-media/chat-app/mobile.md
     - News Feed:
-      - news-feed/generic.md
-      - news-feed/mobile.md
+      - social-media/news-feed/generic.md
+      - social-media/news-feed/mobile.md
     - Instagram / Photo Sharing:
-      - instagram/mobile.md
+      - social-media/instagram/mobile.md
     - Video Streaming:
-      - video-streaming/mobile.md
+      - social-media/video-streaming/mobile.md
     - Multimedia Feed:
-      - multimedia-feed/mobile.md
+      - social-media/multimedia-feed/mobile.md
 
   - E-Commerce & Payments:
     - E-Commerce:
-      - e-commerce/mobile.md
+      - e-commerce-payments/e-commerce/mobile.md
     - Mobile Payment:
-      - mobile-payment/generic.md
-      - mobile-payment/mobile.md
+      - e-commerce-payments/mobile-payment/generic.md
+      - e-commerce-payments/mobile-payment/mobile.md
     - Stock Broking:
-      - stock-broking/generic.md
-      - stock-broking/mobile.md
+      - e-commerce-payments/stock-broking/generic.md
+      - e-commerce-payments/stock-broking/mobile.md
     - Hotel Reservation:
-      - hotel-reservation/generic.md
-      - hotel-reservation/mobile.md
+      - e-commerce-payments/hotel-reservation/generic.md
+      - e-commerce-payments/hotel-reservation/mobile.md
 
   - Productivity & Location:
     - Offline Document Editor:
-      - offline-document-editor/mobile.md
+      - productivity-location/offline-document-editor/mobile.md
     - Location-Based App:
-      - location-based-app/mobile.md
+      - productivity-location/location-based-app/mobile.md
     - Search Autocomplete:
-      - search-autocomplete/mobile.md
+      - productivity-location/search-autocomplete/mobile.md
 
   - Education & Testing:
     - Live Class App:
-      - live-class/mobile.md
+      - education-testing/live-class/mobile.md
     - Test Taking:
-      - test-taking/mobile.md
-
-  - Best Practices:
-    - best-practices/index.md
+      - education-testing/test-taking/mobile.md
 
   - Infrastructure & SDKs:
     - Image Loading Library:
-      - image-loading/mobile.md
+      - infrastructure-sdks/image-loading/mobile.md
     - File Download Manager:
-      - file-download-manager/mobile.md
+      - infrastructure-sdks/file-download-manager/mobile.md
     - Network Layer:
-      - network-layer/mobile.md
+      - infrastructure-sdks/network-layer/mobile.md
     - Push Notification:
-      - push-notification/mobile.md
+      - infrastructure-sdks/push-notification/mobile.md
     - Analytics SDK:
-      - analytics-sdk/mobile.md
+      - infrastructure-sdks/analytics-sdk/mobile.md
     - Feature Flags:
-      - feature-flags/mobile.md
+      - infrastructure-sdks/feature-flags/mobile.md
     - Design System:
-      - design-system/mobile.md
+      - infrastructure-sdks/design-system/mobile.md
     - App Update & Migration:
-      - app-update-migration/mobile.md
+      - infrastructure-sdks/app-update-migration/mobile.md
     - Pagination Library:
-      - pagination-library/mobile.md
+      - infrastructure-sdks/pagination-library/mobile.md
