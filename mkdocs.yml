@@ -1,0 +1,55 @@
+site_name: Sandybox — System Design
+site_description: System Design Interview Prep Knowledge Base
+site_author: Sandy
+
+theme:
+  name: material
+  palette:
+    scheme: slate
+    primary: deep purple
+    accent: deep purple
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+plugins:
+  - search
+  - tags
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - toc:
+      permalink: true
+  - attr_list
+  - md_in_html
+
+docs_dir: designs
+
+nav:
+  - Home:
+    - index.md
+
+  - Chat Application:
+    - chat-app/generic.md
+    - chat-app/mobile.md
+
+  - News Feed:
+    - news-feed/generic.md
+    - news-feed/mobile.md
