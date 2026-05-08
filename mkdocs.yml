@@ -46,10 +46,46 @@ nav:
   - Home:
     - index.md
 
-  - Chat Application:
-    - chat-app/generic.md
-    - chat-app/mobile.md
+  - Social & Media:
+    - Chat Application:
+      - chat-app/generic.md
+      - chat-app/mobile.md
+    - News Feed:
+      - news-feed/generic.md
+      - news-feed/mobile.md
+    - Instagram / Photo Sharing:
+      - instagram/mobile.md
+    - Video Streaming:
+      - video-streaming/mobile.md
 
-  - News Feed:
-    - news-feed/generic.md
-    - news-feed/mobile.md
+  - E-Commerce & Payments:
+    - E-Commerce:
+      - e-commerce/mobile.md
+    - Mobile Payment:
+      - mobile-payment/mobile.md
+
+  - Productivity & Location:
+    - Offline Document Editor:
+      - offline-document-editor/mobile.md
+    - Location-Based App:
+      - location-based-app/mobile.md
+    - Search Autocomplete:
+      - search-autocomplete/mobile.md
+
+  - Infrastructure & SDKs:
+    - Image Loading Library:
+      - image-loading/mobile.md
+    - File Download Manager:
+      - file-download-manager/mobile.md
+    - Network Layer:
+      - network-layer/mobile.md
+    - Push Notification:
+      - push-notification/mobile.md
+    - Analytics SDK:
+      - analytics-sdk/mobile.md
+    - Feature Flags:
+      - feature-flags/mobile.md
+    - Design System:
+      - design-system/mobile.md
+    - App Update & Migration:
+      - app-update-migration/mobile.md
