@@ -1,4 +1,4 @@
-# News Feed System
+# Backend System
 
 Designing a news feed / timeline system (Twitter/X timeline, Facebook News Feed, Instagram feed) is arguably the most iconic system design interview question. It tests your understanding of fan-out strategies, ranking algorithms, caching at scale, and the tension between write amplification and read latency. The core challenge: when a user opens their feed, show them the most relevant posts from people they follow -- in under 500ms, for 500M+ daily active users.
 

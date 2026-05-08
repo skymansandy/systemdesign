@@ -2,6 +2,9 @@
 
 This document covers the **client-side** design of a mobile payment application (Google Pay / Apple Pay / Venmo / Cash App). The focus is on architecture decisions unique to financial apps on mobile: payment tokenization, secure storage, biometric authentication, offline transaction handling, idempotent payment submission, and PCI compliance. The target reader is a senior Android or KMP engineer preparing for a system design interview.
 
+!!! note "Backend Perspective"
+    For server-side architecture -- double-entry ledger, payment processing pipeline, fraud detection, tokenization vault, settlement, and webhook delivery -- see [Backend Payment Architecture](generic.md).
+
 !!! note "Why This Is an Excellent Interview Topic"
     Mobile payments sit at the intersection of security, distributed systems, and UX. You must reason about exactly-once semantics (double-charge prevention), cryptographic key management on-device, OS-level secure hardware (Keystore / Secure Enclave), and regulatory constraints (PCI DSS) -- all while delivering a sub-second tap-to-pay experience. Few topics test breadth and depth like this one.
 

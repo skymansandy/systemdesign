@@ -43,6 +43,13 @@ When a topic is **purely backend** (e.g., URL Shortener) or **purely mobile** (e
 
 - Create a single document (`generic.md` or `mobile.md`) in the topic folder
 
+### H1 Title Rule
+
+The H1 (`#`) title must **not repeat the nav section name**. Since the nav already groups articles under the topic (e.g., "Chat Application"), the H1 should only state the perspective:
+
+- `generic.md` → `# Backend Architecture`
+- `mobile.md` → `# Mobile Client Architecture`
+
 ### Document Structure
 
 Every article is a **single file** (not split across multiple files). It follows an interview-style flow. Mobile and generic documents have distinct section templates.

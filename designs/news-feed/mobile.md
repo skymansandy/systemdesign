@@ -1,4 +1,4 @@
-# News Feed — Mobile
+# Mobile Architecture
 
 This document covers the **client-side architecture** of a mobile news feed application: how the app structures its feed rendering pipeline, handles infinite scroll with 60fps performance, manages an offline-first cache layer, and optimizes for battery and bandwidth on resource-constrained devices. Think Twitter/X, Instagram, or Facebook's home feed — from the perspective of a senior Android/KMP engineer building the client.
 

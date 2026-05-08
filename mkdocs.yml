@@ -57,12 +57,21 @@ nav:
       - instagram/mobile.md
     - Video Streaming:
       - video-streaming/mobile.md
+    - Multimedia Feed:
+      - multimedia-feed/mobile.md
 
   - E-Commerce & Payments:
     - E-Commerce:
       - e-commerce/mobile.md
     - Mobile Payment:
+      - mobile-payment/generic.md
       - mobile-payment/mobile.md
+    - Stock Broking:
+      - stock-broking/generic.md
+      - stock-broking/mobile.md
+    - Hotel Reservation:
+      - hotel-reservation/generic.md
+      - hotel-reservation/mobile.md
 
   - Productivity & Location:
     - Offline Document Editor:
@@ -71,6 +80,15 @@ nav:
       - location-based-app/mobile.md
     - Search Autocomplete:
       - search-autocomplete/mobile.md
+
+  - Education & Testing:
+    - Live Class App:
+      - live-class/mobile.md
+    - Test Taking:
+      - test-taking/mobile.md
+
+  - Best Practices:
+    - best-practices/index.md
 
   - Infrastructure & SDKs:
     - Image Loading Library:
@@ -89,3 +107,5 @@ nav:
       - design-system/mobile.md
     - App Update & Migration:
       - app-update-migration/mobile.md
+    - Pagination Library:
+      - pagination-library/mobile.md

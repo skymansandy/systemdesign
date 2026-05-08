@@ -1,4 +1,4 @@
-# Chat Application -- Mobile Client Architecture
+# Mobile Client Architecture
 
 This document covers the **client-side** design of a mobile chat application (WhatsApp / Telegram / Signal). The focus is on architecture decisions that matter on a resource-constrained device: offline-first data flow, WebSocket lifecycle, sync engines, push notifications, and efficient rendering. The target reader is a senior Android or KMP engineer preparing for a system design interview.
 

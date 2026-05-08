@@ -1,4 +1,4 @@
-# Chat Application — Backend Architecture
+# Backend Architecture
 
 Designing a real-time chat application (WhatsApp, Slack, Discord) is one of the most frequently asked system design questions -- and for good reason. It tests a wide surface area: real-time bidirectional communication, data modeling at write-heavy scale, delivery guarantees in distributed systems, connection management, and storage engine selection. Walk through it methodically: clarify requirements, sketch architecture, then drill into the hard parts -- WebSocket scaling, message ordering, and storage at 700K writes/sec.
 
