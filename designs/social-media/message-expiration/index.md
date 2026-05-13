@@ -1,62 +1,40 @@
-# Backend Architecture
+# Message Expiration
 
 How do apps like Telegram, Signal, and Snapchat delete messages after a TTL expires -- in real time, at scale, without melting their databases? This is a nuanced infrastructure problem that tests your understanding of storage engines, distributed scheduling, consistency trade-offs, and the gap between "deleted from the UI" and "deleted from disk." Walk through it methodically: clarify what "expiration" means, design the storage layer, then drill into the hard parts -- clock skew, deletion throughput at scale, and cryptographic erasure.
 
 !!! note "Mobile Perspective"
-    For client-side expiration -- local DB cleanup, UI countdown timers, process-death resilience, and screenshot prevention -- see [Mobile Client Architecture](mobile.md) *(not yet written)*.
+    Client-side expiration (local DB cleanup, UI countdown timers, process-death resilience, screenshot prevention) is not yet covered in this article.
 
 ---
 
-## Problem & Design Scope
+## Scoping the Problem
 
-### Clarifying Questions
+The first thing I'd want to clarify is **who sets the TTL** -- per-message (Telegram), per-chat (Signal), or global policy (Snapchat). Each has different storage implications. Per-message TTL is the most flexible and the hardest to implement, so I'd scope for that.
 
-| # | Question | Why It Matters |
-|---|----------|---------------|
-| 1 | **Who sets the TTL?** | Per-message (Telegram), per-chat (Signal), or global policy (Snapchat) -- each has different storage implications |
-| 2 | **What does "deleted" mean?** | Removed from UI? Tombstoned? Cryptographically erased? Purged from backups? Compliance requirements change the answer |
-| 3 | **What's the TTL range?** | 5 seconds (Snapchat) vs. 7 days (Telegram) drives whether you need sub-second precision or batch daily cleanup |
-| 4 | **How many messages per second need expiration checks?** | 10K/sec is a different problem than 10M/sec |
-| 5 | **Must deletion be exact-time or best-effort?** | "Delete at exactly T+24h" requires a scheduler. "Delete within a few minutes of T+24h" allows batch processing |
-| 6 | **Multi-device -- must deletion propagate?** | If Alice's message expires, it must disappear from Bob's phone, Alice's phone, and Alice's tablet simultaneously |
-| 7 | **Is the message content or just the reference deleted?** | Media (images, video) stored in object storage needs separate cleanup from the DB row |
-| 8 | **Audit trail requirements?** | Some jurisdictions require proof of deletion. Metadata about the deletion event may need to persist even after the content is gone |
-| 9 | **Does deletion affect read replicas and caches?** | A message "deleted" in the primary but still served from a Redis cache or CDN edge is not really deleted |
-| 10 | **Encryption model?** | With E2E encryption, the server may not even know the message content -- but it still stores the ciphertext blob |
+Next, **what does "deleted" actually mean?** Removed from the UI? Tombstoned in the database? Cryptographically erased? Purged from backups? Compliance requirements fundamentally change the answer. I'd design for content being non-recoverable post-deletion, which pushes us toward crypto erasure.
 
-### Functional Requirements
+The **TTL range** matters a lot. 5 seconds (Snapchat) vs. 7 days (Telegram) drives whether you need sub-second precision or batch daily cleanup. I'd scope for the full range -- seconds to days -- which means the expiration scheduler needs to handle both.
 
-| Requirement | Details |
-|-------------|---------|
-| **Per-message TTL** | Sender sets a self-destruct timer (e.g., 5s, 1h, 24h, 7d) when composing |
-| **Automatic deletion** | Messages are removed after TTL expires, no user action required |
-| **Multi-device propagation** | Deletion is pushed to all participants' devices |
-| **Media cleanup** | Associated images, video, files are purged from object storage |
-| **Deletion confirmation** | Sender is notified that the message was successfully deleted across all devices |
+A few other questions that meaningfully shape the design:
 
-### Non-Functional Requirements
+- **Exact-time or best-effort deletion?** "Delete at exactly T+24h" requires a real-time scheduler. "Delete within a couple minutes of T+24h" allows batch processing. I'd target within 30 seconds -- tight enough for user trust, loose enough for batching.
+- **Multi-device propagation?** If Alice's message expires, it must disappear from Bob's phone, Alice's phone, and Alice's tablet simultaneously. So yes -- server-side deletion with fan-out.
+- **Content vs. reference?** Media (images, video) in object storage needs separate cleanup from the DB row. Two deletion paths.
+- **Does the TTL start on send or on read?** "On-send" is server-controlled and deterministic. "On-read" requires client-side reporting and introduces a two-phase lifecycle. I'd support both -- it's a critical differentiator.
+- **Encryption model?** With E2E encryption, the server stores ciphertext it can't read -- but it still needs to purge it.
+- **Audit trail?** Some jurisdictions require proof of deletion. Metadata about the deletion event may need to persist even after the content is gone.
 
-| Requirement | Target | Rationale |
-|-------------|--------|-----------|
-| **Deletion accuracy** | Within 30 seconds of TTL expiry | Users trust the timer. A message lingering 5 minutes past expiry is a privacy violation |
-| **Throughput** | Handle 1M message expirations/minute | At Telegram's scale (700M+ MAU), expired messages accumulate fast |
-| **No data leakage** | Content not recoverable post-deletion | This is often a legal/compliance requirement, not just a UX one |
-| **Availability** | Deletion must not depend on the recipient being online | Server-side deletion happens regardless of device state |
-| **Consistency** | All replicas/caches purged within 60 seconds | Stale reads of deleted messages erode user trust |
-| **Scalability** | Linear cost scaling with message volume | Deletion infra shouldn't become the bottleneck as traffic grows |
+**Core scope:** Per-message TTL set by the sender (5s to 7d), automatic server-side deletion, multi-device propagation, media cleanup, deletion confirmation to sender. Support both "on-send" and "on-read" TTL start modes.
 
-### Capacity Estimation
+**Key non-functional priorities:**
 
-| Parameter | Value |
-|-----------|-------|
-| DAU | 200M |
-| Messages with TTL (% of total) | 15% |
-| Total messages/day | 10B |
-| Expiring messages/day | 1.5B |
-| Expirations/second (avg) | ~17K/sec |
-| Peak expirations/second (3x) | ~50K/sec |
-| Avg message size | 300 bytes |
-| Storage reclaimed/day | 1.5B x 300B ≈ 450 GB/day |
+- **Deletion accuracy** -- within 30 seconds of TTL expiry. Messages lingering past expiry is a privacy violation, not just a bug.
+- **Throughput** -- handle 1M expirations/minute. At Telegram's scale (700M+ MAU), expired messages accumulate fast.
+- **No data leakage** -- content not recoverable post-deletion. Often a legal/compliance requirement.
+- **Availability** -- deletion must not depend on the recipient being online. Server-side deletion happens regardless of device state.
+- **Consistency** -- all replicas and caches purged within 60 seconds.
+
+**Quick capacity check:** With 200M DAU, 10B messages/day, and 15% having TTL, that's ~1.5B expirations/day -- roughly 17K/sec average, 50K/sec at peak. Each deletion reclaims ~300 bytes on average, so we're reclaiming ~450 GB/day. These numbers tell me batch-per-minute processing is viable, and the storage reclamation is meaningful but not enormous.
 
 ---
 
@@ -91,12 +69,14 @@ POST /api/v1/messages
 
 // For offline devices: processed on next sync
 GET /api/v1/conversations/{conv_id}/sync?since={last_sync_cursor}
-→ includes deletion tombstones in the sync response
+// includes deletion tombstones in the sync response
 ```
 
 ---
 
-## High-Level Architecture
+## Backend Architecture
+
+### System Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -145,17 +125,13 @@ GET /api/v1/conversations/{conv_id}/sync?since={last_sync_cursor}
 └─────────────────────────────────────────────────────────────────┘
 ```
 
----
+### The Core Problem: Finding Expired Messages Efficiently
 
-## Design Deep Dive
-
-### The Core Problem: How to Find Expired Messages Efficiently
-
-This is where the interview gets interesting. There are three fundamentally different approaches, each with distinct trade-offs.
+This is where the interview gets interesting. There are three fundamentally different approaches, and the right answer combines two of them.
 
 #### Option A: Database TTL (Cassandra TTL)
 
-Cassandra and ScyllaDB natively support per-row TTL. When you write a message, you set the TTL, and Cassandra deletes it automatically during compaction.
+Cassandra and ScyllaDB natively support per-row TTL. Set it at write time and Cassandra deletes automatically during compaction.
 
 ```cql
 INSERT INTO messages (conversation_id, message_id, body, sender_id, created_at)
@@ -163,18 +139,13 @@ VALUES ('conv_abc', 'msg_xyz', 'Secret message', 'user_1', toTimestamp(now()))
 USING TTL 86400;   -- auto-deleted after 24 hours
 ```
 
-| Pros | Cons |
-|------|------|
-| Zero application-level scheduling code | Deletion happens during **compaction**, not at exact TTL expiry. Can lag minutes to hours |
-| Battle-tested at scale (Cassandra handles this natively) | No hook to trigger side effects (media cleanup, cache invalidation, client notification) |
-| Storage reclaimed automatically | "On-read" TTL start is impossible -- Cassandra TTL is set at write time |
-| Simple operational model | No deletion confirmation or audit trail |
+The appeal is zero application-level scheduling code -- battle-tested, storage reclaimed automatically. But the problems are real: deletion happens during **compaction**, not at exact TTL expiry (can lag minutes to hours), there's no hook for side effects (media cleanup, cache invalidation, client notification), "on-read" TTL start is impossible since Cassandra TTL is set at write time, and there's no deletion confirmation or audit trail.
 
-**Verdict:** Good for "fire-and-forget" deletion where exact timing and side effects don't matter. Not sufficient alone for a Telegram-like feature where you need client notification and media cleanup.
+**Verdict:** Good as a safety net, but not sufficient alone. You need client notification and media cleanup, and Cassandra TTL can't trigger those.
 
-#### Option B: Delay Queue (Kafka + Scheduled Delivery)
+#### Option B: Delay Queue
 
-When a message with TTL is stored, enqueue a delayed deletion event. The event fires at the exact expiry time.
+When a message with TTL is stored, enqueue a delayed deletion event that fires at the exact expiry time.
 
 ```
 Message stored at T=0 with TTL=24h
@@ -183,7 +154,7 @@ Message stored at T=0 with TTL=24h
 At T+24h, the delay queue delivers the event to the Deletion Executor
 ```
 
-**Implementation options for the delay queue:**
+Several technologies work here:
 
 | Technology | How It Works | Trade-offs |
 |------------|-------------|------------|
@@ -194,11 +165,11 @@ At T+24h, the delay queue delivers the event to the Deletion Executor
 | **Database-backed scheduler** | `expiration_queue` table with `fire_at` index, polled by workers | Simple, durable, but polling adds DB load |
 
 !!! tip "Pro Tip"
-    **The database-backed scheduler is underrated** for this use case. A simple table with a `fire_at` index, polled every 5 seconds by N workers using `SELECT ... WHERE fire_at <= now() ORDER BY fire_at LIMIT 1000 FOR UPDATE SKIP LOCKED`, handles 50K/sec easily on a modern Postgres instance. It's durable, debuggable, and doesn't require a separate queue infrastructure. This is what most teams should start with before reaching for Kafka.
+    **The database-backed scheduler is underrated** for this use case. A simple table with a `fire_at` index, polled every 5 seconds by N workers using `SELECT ... WHERE fire_at <= now() ORDER BY fire_at LIMIT 1000 FOR UPDATE SKIP LOCKED`, handles 50K/sec easily on a modern Postgres instance. It's durable, debuggable, and doesn't require separate queue infrastructure. This is what most teams should start with before reaching for Kafka.
 
 #### Option C: Time-Bucketed Scanner (Recommended for Scale)
 
-Partition expiring messages into **time buckets** (e.g., 1-minute windows). A fleet of scanner workers processes each bucket when its time arrives.
+This is the approach I'd recommend. Partition expiring messages into **time buckets** (e.g., 1-minute windows). A fleet of scanner workers processes each bucket when its time arrives.
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -238,12 +209,7 @@ SELECT * FROM message_expiry_index
 WHERE expiry_bucket = '2025-03-16T10:30:00';
 ```
 
-| Pros | Cons |
-|------|------|
-| Predictable, bounded work per cycle | Granularity is limited to bucket size (1 min) |
-| Horizontally scalable (shard buckets across workers) | Requires coordination to avoid double-processing |
-| No long-lived delayed messages in a queue | Hot buckets (many expirations in one minute) need sub-partitioning |
-| Works natively with Cassandra's partition model | Two writes per message (message + expiry index) |
+The strengths here are predictable, bounded work per cycle, horizontal scalability (shard buckets across workers), no long-lived delayed messages sitting in a queue, and it works natively with Cassandra's partition model. The downsides are granularity limited to bucket size (1 min), coordination needed to avoid double-processing, hot buckets needing sub-partitioning, and two writes per message (message + expiry index).
 
 !!! warning "Edge Case"
     **Hot buckets**: If a viral group chat sets 24h TTL and gets 100K messages in one minute, the bucket for T+24h will have 100K entries. Solution: sub-partition by conversation_id or add a random shard key (`expiry_bucket, shard_id, message_id`) and distribute scanner workers across shards.
@@ -252,7 +218,7 @@ WHERE expiry_bucket = '2025-03-16T10:30:00';
 
 ### The Deletion Pipeline
 
-Once the scanner identifies expired messages, each deletion triggers a pipeline:
+Once the scanner identifies expired messages, each deletion triggers a multi-step pipeline:
 
 ```
 ┌─────────────┐     ┌───────────────┐     ┌──────────────┐
@@ -273,22 +239,18 @@ Once the scanner identifies expired messages, each deletion triggers a pipeline:
 └──────────────┘                        └──────────────┘
 ```
 
-**Key design decisions in the pipeline:**
+The key design decisions in this pipeline:
 
-1. **Tombstones, not hard deletes**: Write a tombstone record (`{ message_id, deleted_at, reason: "ttl_expired" }`) before deleting the content. This allows offline devices to sync the deletion and is essential for consistency.
-
-2. **Media deletion is async and batched**: S3 `DeleteObjects` supports batch deletion of up to 1,000 keys. Accumulate media keys and batch-delete every few seconds.
-
-3. **Cache invalidation is best-effort**: Redis keys may have already expired via their own TTL. Use `DEL` if the key exists, but don't fail the pipeline if the cache miss.
-
-4. **Client push is fire-and-forget**: Send the WebSocket event. If the client is offline, the tombstone will be picked up during next sync. Don't block on delivery confirmation.
+- **Tombstones, not hard deletes.** Write a tombstone record (`{ message_id, deleted_at, reason: "ttl_expired" }`) before deleting the content. This allows offline devices to sync the deletion and is essential for consistency.
+- **Media deletion is async and batched.** S3 `DeleteObjects` supports batch deletion of up to 1,000 keys. Accumulate media keys and batch-delete every few seconds rather than one-by-one.
+- **Cache invalidation is best-effort.** Redis keys may have already expired via their own TTL. Use `DEL` if the key exists, but don't fail the pipeline on a cache miss.
+- **Client push is fire-and-forget.** Send the WebSocket event. If the client is offline, the tombstone will be picked up during next sync. Don't block on delivery confirmation.
 
 ### "On-Read" TTL: The Hard Variant
 
-When TTL starts on first read (Telegram secret chats, Snapchat), the server doesn't know when to start the timer until the client reports a read event.
+When TTL starts on first read (Telegram secret chats, Snapchat), the server doesn't know when to start the timer until the client reports a read event. This creates a two-phase lifecycle:
 
 ```
-Sequence:
 1. Alice sends message with ttl=60s, ttl_start=on_read
 2. Server stores message with expiry_at=NULL
 3. Bob opens the chat → client sends read receipt
@@ -302,22 +264,16 @@ Sequence:
 
 ### Clock Skew and Distributed Timing
 
-In a distributed system, "now" is not a single value. Different servers have slightly different clocks.
+In a distributed system, "now" is not a single value. The timing concerns I'd address:
 
-| Problem | Impact | Mitigation |
-|---------|--------|-----------|
-| **Server clock skew** | Message expires 30s early or late on different nodes | Use NTP with tight sync (< 1s). Accept ±30s accuracy for TTLs > 1 minute |
-| **Client clock manipulation** | Malicious client reports fake read time to delay/accelerate TTL | Server always uses its own clock for `expiry_at`, never trusts client timestamps |
-| **Timezone confusion** | TTL stored as absolute time in different zones | Always use UTC epoch milliseconds internally. Never store local time |
-| **Leap seconds** | Rare but can cause 1s discontinuity | Use TAI or monotonic clocks for timer comparisons. In practice, ±1s is fine for TTL |
+- **Server clock skew** -- different nodes expire the same message at slightly different times. Mitigation: NTP with tight sync (< 1s). Accept +/-30s accuracy for TTLs > 1 minute.
+- **Client clock manipulation** -- a malicious client reports a fake read time to delay or accelerate TTL. Mitigation: the server always uses its own clock for `expiry_at`, never trusts client timestamps.
+- **Timezone confusion** -- always use UTC epoch milliseconds internally. Never store local time.
+- **Leap seconds** -- use TAI or monotonic clocks for timer comparisons. In practice, +/-1s is fine for TTL.
 
 ### Cryptographic Erasure: True Deletion
 
-Simply deleting a database row doesn't guarantee the data is gone. It may exist in:
-- Replication logs (Cassandra commit log, Kafka topics)
-- Backup snapshots
-- OS file system (deleted but not overwritten)
-- Read replicas with replication lag
+Simply deleting a database row doesn't guarantee the data is gone. It may exist in replication logs (Cassandra commit log, Kafka topics), backup snapshots, the OS file system (deleted but not overwritten), or read replicas with replication lag.
 
 **Cryptographic erasure** solves this: encrypt each message with a unique key. To "delete" the message, delete the key. The ciphertext becomes unrecoverable.
 
@@ -335,7 +291,7 @@ Deletion path:
 ```
 
 !!! tip "Pro Tip"
-    This is an **interview power move**. If you mention cryptographic erasure, you demonstrate awareness of the gap between "application-level delete" and "data is truly gone." Most candidates stop at `DELETE FROM messages`. Bringing up crypto erasure shows you think about compliance (GDPR right to erasure), backup recovery scenarios, and defense in depth.
+    This is an **interview power move**. Mentioning cryptographic erasure demonstrates awareness of the gap between "application-level delete" and "data is truly gone." Most candidates stop at `DELETE FROM messages`. Bringing up crypto erasure shows you think about compliance (GDPR right to erasure), backup recovery scenarios, and defense in depth.
 
 ---
 
@@ -382,7 +338,7 @@ Redis / Vault:
 
 ---
 
-## Scalability & Reliability
+## Scalability, Reliability & Edge Cases
 
 ### Horizontal Scaling of the Scanner
 
@@ -402,7 +358,7 @@ Redis / Vault:
         └──────────┘  └──────────┘  └──────────┘
 ```
 
-- **Partition assignment**: Use consistent hashing or a simple modulo on `bucket_minute % num_workers`. Workers claim ownership via a distributed lock (ZooKeeper, etcd).
+- **Partition assignment**: Use consistent hashing or simple modulo on `bucket_minute % num_workers`. Workers claim ownership via a distributed lock (ZooKeeper, etcd).
 - **Idempotent deletion**: If a worker crashes mid-bucket, the next worker can re-process safely. Deletion of an already-deleted message is a no-op.
 - **Backpressure**: If deletions are falling behind (bucket queue growing), auto-scale workers. Monitor `current_time - oldest_unprocessed_bucket` as the key lag metric.
 
@@ -425,16 +381,14 @@ Redis / Vault:
 | `orphaned_media_keys_count` | > 10,000 | S3 storage leak, costs growing |
 | `tombstone_sync_backlog` | > 1M | Offline devices accumulating un-synced deletions |
 
----
-
-## Edge Cases & Decisions
+### Edge Cases & Decisions
 
 | Scenario | Decision | Reasoning |
 |----------|----------|-----------|
 | **Message forwarded before expiry** | Forwarded copy gets its own TTL (or none if chat isn't TTL-enabled) | Original TTL only applies to the original conversation |
 | **User goes offline before reading TTL message** | "On-read" TTL stays dormant. "On-send" TTL expires regardless | On-send is server-controlled; on-read waits for client event |
-| **Backup restoration after expiry** | Cryptographic erasure ensures restored ciphertext is unreadable | Key was deleted before backup restore. This is the whole point |
-| **Group chat TTL with 500 members** | Server deletes once; sends 500 deletion events | Don't delete 500 copies of the message -- there's only one row. Fan out the notification |
+| **Backup restoration after expiry** | Cryptographic erasure ensures restored ciphertext is unreadable | Key was deleted before backup restore -- this is the whole point |
+| **Group chat TTL with 500 members** | Server deletes once; sends 500 deletion events | Don't delete 500 copies -- there's only one row. Fan out the notification |
 | **TTL change mid-flight** | Disallow. TTL is immutable once set | Allowing changes adds complexity (re-scheduling) with minimal user value |
 | **Regulatory hold / legal preservation** | Override TTL for flagged accounts, store in separate compliance store | Must be invisible to the user to avoid evidence destruction |
 
@@ -442,16 +396,14 @@ Redis / Vault:
 
 ## Wrap Up
 
-The key design decisions for message expiration at scale:
+- **Time-bucketed scanner** as the primary expiration mechanism -- minute-granularity buckets, horizontally scalable workers, idempotent deletion.
+- **Cassandra native TTL** as a safety net -- ensures data is eventually purged even if the scanner misses it.
+- **Tombstone-based deletion propagation** so offline devices can sync deletions on reconnect.
+- **Cryptographic erasure** for true deletion -- delete the key, and the ciphertext becomes irrecoverable across all replicas and backups.
+- **"On-read" TTL** requires a two-phase write: store with NULL expiry, set expiry on read receipt with idempotent CAS.
+- **Monitor expiration lag** as the critical metric. Messages lingering past TTL is a privacy incident, not just a bug.
 
-1. **Time-bucketed scanner** as the primary expiration mechanism. Minute-granularity buckets, horizontally scalable workers, idempotent deletion.
-2. **Cassandra native TTL** as a safety net -- ensures data is eventually purged even if the scanner misses it.
-3. **Tombstone-based deletion propagation** so offline devices can sync deletions on reconnect.
-4. **Cryptographic erasure** for true deletion -- delete the key, and the ciphertext becomes irrecoverable across all replicas and backups.
-5. **"On-read" TTL** requires a two-phase write: store with NULL expiry, set expiry on read receipt with idempotent CAS.
-6. **Monitor expiration lag** as the critical metric. Messages lingering past TTL is a privacy incident, not just a bug.
-
-**With more time**, I'd design: configurable TTL policies per organization (enterprise compliance), integration with GDPR right-to-erasure workflows, multi-region deletion coordination with causal ordering, and a TTL visualization dashboard for end users showing exactly when each message will expire.
+**What I'd improve with more time:** configurable TTL policies per organization (enterprise compliance), integration with GDPR right-to-erasure workflows, multi-region deletion coordination with causal ordering, and a TTL visualization dashboard for end users showing exactly when each message will expire.
 
 ---
 

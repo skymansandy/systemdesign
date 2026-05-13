@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Sandybox System Design is a dedicated system design interview prep knowledge base built with **MkDocs** and the **Material for MkDocs** theme. Content is written in Markdown. Topics are submitted via Slack bot (`/systemdesign` command).
+Sandybox System Design is a dedicated system design interview prep knowledge base built with **MkDocs** and the **Material for MkDocs** theme. Content is written in Markdown.
 
 ## Commands
 
@@ -15,141 +15,108 @@ Sandybox System Design is a dedicated system design interview prep knowledge bas
 
 All content lives in `designs/` as Markdown files, organized **by topic**. The navigation tree is **manually defined** in `mkdocs.yml` under `nav:` — new pages must be added there to appear in the site.
 
+Each topic has a **single `index.md`** file. Topics that cover both backend and mobile perspectives merge them into one document under a shared table of contents — backend-specific and mobile-specific sections appear as H2s within the same file. Shared context (requirements, API design) appears once.
+
 ```
 designs/
 ├── index.md                          # Home page
 ├── home/
-│   ├── best-practices/index.md       # Interview best practices
-│   ├── building-blocks/index.md      # Reusable architectural components
-│   ├── tech-tradeoffs/index.md       # Technology comparison tables
-│   └── platform-fundamentals/index.md # Android/iOS platform constraints
+│   ├── best-practices/index.md
+│   ├── building-blocks/index.md
+│   ├── tech-tradeoffs/index.md
+│   └── platform-fundamentals/index.md
 ├── social-media/
-│   ├── chat-app/          (generic + mobile)
-│   ├── news-feed/         (generic + mobile)
-│   ├── instagram/         (mobile)
-│   ├── video-streaming/   (mobile)
-│   └── multimedia-feed/   (mobile)
+│   ├── chat-app/index.md
+│   ├── news-feed/index.md
+│   ├── instagram/index.md
+│   ├── video-streaming/index.md
+│   ├── multimedia-feed/index.md
+│   ├── reddit-comments/index.md
+│   └── message-expiration/index.md
 ├── e-commerce-payments/
-│   ├── e-commerce/        (mobile)
-│   ├── mobile-payment/    (generic + mobile)
-│   ├── stock-broking/     (generic + mobile)
-│   └── hotel-reservation/ (generic + mobile)
+│   ├── e-commerce/index.md
+│   ├── mobile-payment/index.md
+│   ├── stock-broking/index.md
+│   └── hotel-reservation/index.md
 ├── productivity-location/
-│   ├── offline-document-editor/ (mobile)
-│   ├── location-based-app/     (mobile)
-│   └── search-autocomplete/    (mobile)
+│   ├── offline-document-editor/index.md
+│   ├── location-based-app/index.md
+│   └── search-autocomplete/index.md
 ├── education-testing/
-│   ├── live-class/   (mobile)
-│   └── test-taking/  (mobile)
+│   ├── live-class/index.md
+│   └── test-taking/index.md
 └── infrastructure-sdks/
-    ├── image-loading/        (mobile)
-    ├── file-download-manager/(mobile)
-    ├── network-layer/        (mobile)
-    ├── push-notification/    (mobile)
-    ├── analytics-sdk/        (mobile)
-    ├── feature-flags/        (mobile)
-    ├── design-system/        (mobile)
-    ├── app-update-migration/ (mobile)
-    └── pagination-library/   (mobile)
+    ├── image-loading/index.md
+    ├── file-download-manager/index.md
+    ├── network-layer/index.md
+    ├── push-notification/index.md
+    ├── analytics-sdk/index.md
+    ├── feature-flags/index.md
+    ├── design-system/index.md
+    ├── app-update-migration/index.md
+    └── pagination-library/index.md
 ```
-
-Inside each topic folder:
-- `generic.md` — Backend/distributed-systems perspective
-- `mobile.md` — Mobile client architecture perspective
-- Some topics may only have one of the two
 
 ## Adding Content
 
 1. Create a folder under `designs/` named after the topic (e.g., `designs/url-shortener/`)
-2. Add `generic.md` and/or `mobile.md` inside that folder
-3. Add the file path(s) to the `nav:` section in `mkdocs.yml`
+2. Add `index.md` inside that folder
+3. Add the file path to the `nav:` section in `mkdocs.yml`
 
-### Topic Splitting Rules
+### Single-File Rule
 
-When a topic is **diverse enough to have both backend and mobile dimensions** (e.g., Chat Application):
+Every topic is **one `index.md`**. If a topic has both backend and mobile dimensions, merge them:
 
-- Create **two documents** in the topic folder: `generic.md` and `mobile.md`
-- Each document is self-contained but **cross-references** the other
-- Generic doc links to `mobile.md` at the top and in relevant sections
-- Mobile doc links to `generic.md` at the top and in relevant sections
-
-When a topic is **purely backend** (e.g., URL Shortener) or **purely mobile** (e.g., Image Gallery offline caching):
-
-- Create a single document (`generic.md` or `mobile.md`) in the topic folder
+- Shared sections (intro, requirements, API design) appear once
+- Backend architecture is an H2 section
+- Mobile client architecture is an H2 section
+- Each section cross-references the other inline
 
 ### H1 Title Rule
 
-The H1 (`#`) title must **not repeat the nav section name**. Since the nav already groups articles under the topic (e.g., "Chat Application"), the H1 should only state the perspective:
+The H1 (`#`) title is the **topic name** (e.g., `# Chat Application`). Perspective sections use H2 (`## Backend Architecture`, `## Mobile Client Architecture`).
 
-- `generic.md` → `# Backend Architecture`
-- `mobile.md` → `# Mobile Client Architecture`
+### Document Structure — Unified Template
 
-### Document Structure
+Every article follows this flow. Sections marked *(if applicable)* are included only when the topic has that dimension.
 
-Every article is a **single file** (not split across multiple files). It follows an interview-style flow. Mobile and generic documents have distinct section templates.
+1. **H1: Topic Name** — 2-3 sentence hook: what this system is, why it's a compelling design problem, what makes it hard.
 
-#### Mobile System Design Template
+2. **Scoping the Problem** — The clarifying questions you'd ask, written as flowing prose ("The first thing I'd want to nail down is..."). Cover functional scope, non-functional priorities, and key constraints. No numbered tables — just the thought process. Include capacity estimation only if it meaningfully drives a design decision (e.g., write-heavy → LSM-tree, not just "here are some big numbers").
 
-1. **Introduction** — What the system is, why it's interesting, link to generic counterpart
-2. **Problem & Design Scope** — Clarifying questions you'd ask the interviewer, functional/non-functional requirements, mobile-specific constraints
-3. **UI Sketch** — ASCII or description of key screens, navigation flow
-4. **API Design** — Thought process for protocol choice (REST vs GraphQL vs gRPC), comparison tables, tradeoffs with reasoning
-5. **API Endpoint Design & Additional Considerations** — Concrete endpoint definitions, pagination strategy, error contract, versioning
-6. **High-Level Architecture** — Mobile clean architecture (UI → Domain → Data), KMP-aligned component map, dependency graph
-7. **Data Flow for Basic Scenarios** — Mermaid flowcharts/sequence diagrams for core user journeys (send message, load feed, etc.)
-8. **Design Deep Dive** — Topic-specific deep dives covering: local DB schema & eviction policy, optimistic writes & the dual-ID problem, sync engine, offline queue, error handling strategies, caching, background processing, push notifications, common challenges
-9. **Edge Cases & Decisions** — Non-obvious scenarios with the decision made and reasoning (e.g., rich text rendering, media attachments, conflict resolution)
-10. **Wrap Up** — Summary of key design decisions, what you'd improve with more time
-11. **References** — Medium articles, blogs, YouTube links, official docs for further learning
+3. **API Design** — Protocol choice with reasoning and a comparison table. Key endpoints (3-5 max) with request/response shapes. Mention pagination and error strategy briefly — don't catalog every field.
 
-#### Generic (Backend) System Design Template
+4. **Backend Architecture** *(if applicable)* — High-level system diagram (Mermaid). Walk through the core components and why each exists. Data model, storage engine choice with reasoning. Deep-dive into the 2-3 genuinely hard problems unique to this system (e.g., fan-out for chat, ranking for feed, double-spend for payments).
 
-1. **Introduction** — What the system is, why it's a common interview question, link to mobile counterpart
-2. **Problem & Design Scope** — Clarifying questions, functional/non-functional requirements, capacity estimation (back-of-the-envelope math)
-3. **API Design** — Protocol choice with reasoning, comparison tables, tradeoffs
-4. **API Endpoint Design & Additional Considerations** — REST/WebSocket/gRPC definitions, pagination, rate limiting, auth
-5. **High-Level Architecture** — System overview diagram, core services, data stores, event bus
-6. **Data Flow for Basic Scenarios** — Mermaid sequence/flow diagrams for core operations
-7. **Design Deep Dive** — Topic-specific sections (e.g., real-time messaging, feed ranking, fan-out strategies)
-8. **Data Model & Storage** — Schema design, database selection with reasoning, caching strategy, sharding
-9. **Scalability & Reliability** — Horizontal scaling, fault tolerance, multi-region, monitoring, cost optimization
-10. **Edge Cases & Decisions** — Non-obvious scenarios with decisions and reasoning
-11. **Wrap Up** — Summary, what you'd improve with more time
-12. **References** — Blogs, papers, videos for further learning
+5. **Mobile Client Architecture** *(if applicable)* — Architecture diagram (Mermaid). Clean architecture layers, KMP-aligned. Deep-dive into mobile-specific hard problems: offline-first, sync engine, local DB, lifecycle, background work, push notifications. Use as many diagrams as needed for data flows, state machines, sequence diagrams.
 
-#### Content Principles (All Documents)
+6. **Scalability, Reliability & Edge Cases** — How the system scales, what breaks first, and how to handle it. Non-obvious failure modes. Fold edge cases into this section rather than separating them.
 
+7. **Wrap Up** — 3-5 bullet summary of key decisions. "What I'd improve with more time." Keep it tight.
+
+8. **References** — External links for advanced deep-dives. Use these to offload content that's beyond expert-level (e.g., CRDT theory, Signal Protocol internals, Raft consensus). Blogs, conference talks, papers, official docs.
+
+### Content Principles
+
+- **Conversational interview tone** — Write as if the author is being interviewed and walking through their thought process. The narrative follows the chain of reasoning: "I'd start by...", "The reason I'd pick X over Y is...", "Now the tricky part here is...". It reads as an article, not a transcript — but the thinking unfolds naturally, not as a dry reference doc.
+- **Expert-level depth, zero filler** — Cover enough to demonstrate near-expert knowledge on each topic. Every sentence should teach something or justify a decision. Cut anything that's just restating the obvious or padding sections.
 - **Decision reasoning everywhere** — For every design choice, explain *why this* and *why not the alternatives*
 - **KMP-aligned** — Mobile code samples use Kotlin (KMP-friendly); mention platform-specific implementations only where they diverge
 - **Modern Android stack** — Compose, Ktor, Room/SQLDelight, Coroutines/Flow, WorkManager, Hilt/Koin
-- **Industry insights** — Reference how well-known apps (WhatsApp, Signal, Instagram, Twitter/X, Slack, Discord) solve specific problems
-- **Offline-first** — Every mobile design must deeply cover offline scenarios, the dual-ID problem, sync conflicts, and queue management
-- **Pro tips** — Use `!!! tip "Pro Tip"` liberally for interview-winning insights
-
-## Content Philosophy
-
-Every article should read like a **principal engineer walking through a design** — structured, opinionated, and interview-ready. Single document per topic, not split across files.
-
-### What to Include
-
-- **Tables over paragraphs** — use comparison tables whenever contrasting options
-- **Mermaid diagrams** — for architecture, data flows, state machines, sequence diagrams
-- **Code snippets** — short and practical (API definitions, schema DDL, config examples)
-- **Edge case info boxes** — use `!!! warning "Edge Case"` admonitions for gotchas and non-obvious failure modes
-- **Cross-references** — link to generic/mobile counterpart where applicable
+- **Industry insights inline** — Reference how well-known apps (WhatsApp, Signal, Instagram, Slack, Discord) solve specific problems. Weave these in where relevant, don't dump them in a separate section.
+- **Offline-first** — Every mobile design must deeply cover offline scenarios, sync conflicts, and queue management
+- **Diagrams as needed** — Use as many Mermaid diagrams as required to convey architecture, data flows, state machines, and sequences. No arbitrary limit.
+- **Pro tips & edge cases** — Use `!!! tip "Pro Tip"` for interview-winning insights. Use `!!! warning "Edge Case"` for gotchas. These are high-signal — keep them.
+- **Tables for comparisons** — Use comparison tables when contrasting options (protocols, databases, caching strategies). Don't use tables for requirements lists — use prose or compact bullets instead.
+- **External links for advanced rabbit holes** — Don't write 500 words on CRDT theory or consensus algorithms. Link to authoritative external resources and move on.
 
 ### What NOT to Include
 
-- **No separate interview questions section** — the document itself IS the interview walkthrough
-- **No filler prose** — assume the reader is a senior engineer
-- **No redundant sections** — if it doesn't add signal for an interview, cut it
-
-### Tone & Style
-
-- Write like a **principal engineer** — opinionated, concise, authoritative
-- **Concise over exhaustive** — just enough to build a mental model and defend design decisions
-- Every section should answer: "What would I say if the interviewer asked about this?"
-- Use `!!! warning "Edge Case"` for gotchas, `!!! tip` for pro tips, `!!! note` for context
+- **No verbose requirements tables** — Don't itemize FRs/NFRs in a table with a "Why It Matters" column. Weave requirements into the scoping narrative.
+- **No capacity estimation theater** — Only include back-of-the-envelope math when it directly drives a design choice. Don't compute numbers just to compute them.
+- **No exhaustive endpoint catalogs** — 3-5 key endpoints, not every CRUD operation
+- **No filler prose** — Assume the reader is a senior engineer
+- **No redundant sections** — If backend and mobile share context, write it once
 
 ## Markdown Features Available
 

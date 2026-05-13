@@ -51,66 +51,36 @@ nav:
     - Platform Fundamentals: home/platform-fundamentals/index.md
 
   - Social & Media:
-    - Chat Application:
-      - social-media/chat-app/generic.md
-      - social-media/chat-app/mobile.md
-    - News Feed:
-      - social-media/news-feed/generic.md
-      - social-media/news-feed/mobile.md
-    - Instagram / Photo Sharing:
-      - social-media/instagram/mobile.md
-    - Video Streaming:
-      - social-media/video-streaming/mobile.md
-    - Multimedia Feed:
-      - social-media/multimedia-feed/mobile.md
-    - Reddit Comment UI:
-      - social-media/reddit-comments/mobile.md
-    - Message Expiration:
-      - social-media/message-expiration/generic.md
+    - Chat Application: social-media/chat-app/index.md
+    - News Feed: social-media/news-feed/index.md
+    - Instagram / Photo Sharing: social-media/instagram/index.md
+    - Video Streaming: social-media/video-streaming/index.md
+    - Multimedia Feed: social-media/multimedia-feed/index.md
+    - Reddit Comment UI: social-media/reddit-comments/index.md
+    - Message Expiration: social-media/message-expiration/index.md
 
   - E-Commerce & Payments:
-    - E-Commerce:
-      - e-commerce-payments/e-commerce/mobile.md
-    - Mobile Payment:
-      - e-commerce-payments/mobile-payment/generic.md
-      - e-commerce-payments/mobile-payment/mobile.md
-    - Stock Broking:
-      - e-commerce-payments/stock-broking/generic.md
-      - e-commerce-payments/stock-broking/mobile.md
-    - Hotel Reservation:
-      - e-commerce-payments/hotel-reservation/generic.md
-      - e-commerce-payments/hotel-reservation/mobile.md
+    - E-Commerce: e-commerce-payments/e-commerce/index.md
+    - Mobile Payment: e-commerce-payments/mobile-payment/index.md
+    - Stock Broking: e-commerce-payments/stock-broking/index.md
+    - Hotel Reservation: e-commerce-payments/hotel-reservation/index.md
 
   - Productivity & Location:
-    - Offline Document Editor:
-      - productivity-location/offline-document-editor/mobile.md
-    - Location-Based App:
-      - productivity-location/location-based-app/mobile.md
-    - Search Autocomplete:
-      - productivity-location/search-autocomplete/mobile.md
+    - Offline Document Editor: productivity-location/offline-document-editor/index.md
+    - Location-Based App: productivity-location/location-based-app/index.md
+    - Search Autocomplete: productivity-location/search-autocomplete/index.md
 
   - Education & Testing:
-    - Live Class App:
-      - education-testing/live-class/mobile.md
-    - Test Taking:
-      - education-testing/test-taking/mobile.md
+    - Live Class App: education-testing/live-class/index.md
+    - Test Taking: education-testing/test-taking/index.md
 
   - Infrastructure & SDKs:
-    - Image Loading Library:
-      - infrastructure-sdks/image-loading/mobile.md
-    - File Download Manager:
-      - infrastructure-sdks/file-download-manager/mobile.md
-    - Network Layer:
-      - infrastructure-sdks/network-layer/mobile.md
-    - Push Notification:
-      - infrastructure-sdks/push-notification/mobile.md
-    - Analytics SDK:
-      - infrastructure-sdks/analytics-sdk/mobile.md
-    - Feature Flags:
-      - infrastructure-sdks/feature-flags/mobile.md
-    - Design System:
-      - infrastructure-sdks/design-system/mobile.md
-    - App Update & Migration:
-      - infrastructure-sdks/app-update-migration/mobile.md
-    - Pagination Library:
-      - infrastructure-sdks/pagination-library/mobile.md
+    - Image Loading Library: infrastructure-sdks/image-loading/index.md
+    - File Download Manager: infrastructure-sdks/file-download-manager/index.md
+    - Network Layer: infrastructure-sdks/network-layer/index.md
+    - Push Notification: infrastructure-sdks/push-notification/index.md
+    - Analytics SDK: infrastructure-sdks/analytics-sdk/index.md
+    - Feature Flags: infrastructure-sdks/feature-flags/index.md
+    - Design System: infrastructure-sdks/design-system/index.md
+    - App Update & Migration: infrastructure-sdks/app-update-migration/index.md
+    - Pagination Library: infrastructure-sdks/pagination-library/index.md

@@ -1,80 +1,30 @@
-# File Download Manager -- Mobile Client Architecture
+# File Download Manager
 
-This document covers the **client-side** design of a mobile file download manager -- the kind you see in Chrome, Telegram, podcast apps, or any application that downloads large files in the background. The focus is on architecture decisions unique to mobile: resumable downloads over unreliable networks, background execution under OS restrictions, progress tracking, storage management, and priority scheduling. The target reader is a senior Android or KMP engineer preparing for a system design interview.
-
-**Why a download manager is its own design problem:**
-
-- Files can be hundreds of megabytes. A single dropped connection at 95% must not restart the download.
-- The OS aggressively kills background processes (Doze, App Standby, battery optimization). Your download must survive process death.
-- Concurrent downloads compete for bandwidth, memory, and I/O. Naive parallelism degrades all downloads.
-- The user expects accurate progress, pause/resume, and the ability to queue dozens of files without the app freezing.
-- Storage is finite. You must handle disk-full scenarios, temp file cleanup, and atomic file placement.
-
-Every design decision in this document is driven by those constraints.
+Designing a mobile file download manager -- the kind you see in Chrome, Telegram, or podcast apps -- is a deceptively hard problem. A single dropped connection at 95% of a 500 MB file must not restart the download. The OS aggressively kills background processes, so your download must survive process death. Concurrent downloads compete for bandwidth, memory, and I/O. And the user expects accurate progress, pause/resume, and the ability to queue dozens of files without the app freezing. Every design decision here is driven by those constraints.
 
 ---
 
-## Problem & Design Scope
+## Scoping the Problem
 
-### Clarifying Questions
+The first thing I'd want to clarify is file sizes -- PDFs at 5 MB vs. podcast episodes at 200 MB vs. app bundles at 2 GB -- because this drives chunking strategy and storage pre-allocation. Next, does the server support HTTP Range requests? Without `Accept-Ranges: bytes`, resumable downloads are impossible, and that changes our entire fallback strategy.
 
-Before drawing a single box, ask the interviewer these questions to bound the problem:
+I'd also ask about concurrency (1 download? 3? Unlimited?), whether background download is required (which means surviving Doze mode and process death), and whether WiFi-only mode is needed for metered connections. Integrity verification (checksums after download), priority support (user-initiated vs. prefetch), and multi-source CDN downloads all meaningfully change the architecture.
 
-1. **What file types and sizes?** PDFs (5 MB) vs. podcast episodes (200 MB) vs. app bundles (2 GB) -- drives chunking strategy and storage pre-allocation.
-2. **Does the server support HTTP Range requests?** Without `Accept-Ranges: bytes`, resumable downloads are impossible. Determines our fallback strategy.
-3. **How many concurrent downloads?** 1? 3? Unlimited? Drives queue design and bandwidth allocation.
-4. **Background download required?** If yes, downloads must survive app backgrounding, process death, and Doze mode.
-5. **WiFi-only mode needed?** Many users on metered connections want to restrict large downloads to WiFi.
-6. **Integrity verification?** Must we validate checksums (MD5/SHA-256) after download? Drives post-download pipeline.
-7. **Priority support?** Can users or the system reorder the queue? (e.g., user-initiated vs. prefetch downloads)
-8. **Multi-source / CDN?** Can we download chunks from different mirrors simultaneously?
-9. **Target platforms?** Android-only or KMP (shared download engine, platform-specific background scheduling)?
-10. **Notification requirements?** Persistent progress notification? Grouped notifications for multiple downloads?
+**Core scope:** Enqueue downloads by URL, pause/resume from byte offset using Range headers, cancel with cleanup, background execution that survives process death, real-time progress with speed and ETA, priority queue with configurable concurrency, automatic retry with exponential backoff, WiFi-only mode, persistent notification, and optional checksum validation.
 
-### Functional Requirements
+**Key non-functional priorities:**
 
-| Requirement | Details |
-|-------------|---------|
-| **Start download** | Enqueue a URL with metadata (filename, size hint, priority) |
-| **Pause / Resume** | User-initiated pause; resume from where it stopped using Range headers |
-| **Cancel** | Stop download, delete partial file, update state |
-| **Background execution** | Downloads continue when the app is backgrounded or killed |
-| **Progress tracking** | Real-time byte-level progress with speed and ETA |
-| **Queue management** | Ordered queue with configurable concurrency limit |
-| **Retry on failure** | Automatic retry with exponential backoff on transient errors |
-| **WiFi-only mode** | Optionally restrict downloads to unmetered networks |
-| **Notification** | Persistent notification showing active download progress |
-| **File integrity** | Optional checksum validation after download completes |
+- **Resume reliability** -- a 500 MB file at 90% must resume from byte offset, never restart. All progress persisted to DB, not just in-memory.
+- **Battery efficiency** -- < 2% battery/hour during background download. Excessive wake locks get the app killed or uninstalled.
+- **Memory footprint** -- < 20 MB heap for the download engine. Buffer sizes must be bounded; no loading entire files into memory.
+- **Process death resilience** -- DB query for pending downloads on startup in < 200ms, not a full re-scan.
+- **Progress update rate** -- every 500ms to UI (conflated Flow), every 2s to notification (Android rate-limits rebuilds).
 
-### Non-Functional Requirements
-
-| Requirement | Target | Why It Matters |
-|-------------|--------|----------------|
-| **Resume reliability** | Zero re-download on interruption | A 500 MB file at 90% must resume from byte offset, not restart |
-| **Battery efficiency** | < 2% battery/hour during background download | Excessive wake locks and CPU usage get the app killed or uninstalled |
-| **Memory footprint** | < 20 MB heap for download engine | Buffer sizes must be bounded; no loading entire files into memory |
-| **Concurrent downloads** | 3 simultaneous, configurable | Balances throughput vs. resource contention |
-| **Progress update rate** | Every 500ms to UI, every 2s to notification | Faster updates waste CPU on notification rebuilds |
-| **Process death resilience** | Resume from last persisted offset | All progress must be in the database, not just in-memory |
-| **Disk usage** | Temp files cleaned on cancel/failure | Orphaned partial files waste user storage |
-| **Startup time** | < 200ms to restore queue state | DB query for pending downloads, not full re-scan |
-
-### Mobile-Specific Constraints
-
-| Concern | What Makes It Hard |
-|---------|-------------------|
-| **Background limits** | Android Doze mode defers network access. Foreground services require visible notifications. WorkManager has minimum 15-min intervals. |
-| **Network transitions** | WiFi to cellular handoff drops the TCP connection. Must detect and resume seamlessly. |
-| **Storage** | No guaranteed free space. Must check before allocating. External storage may be ejected. |
-| **Battery** | Wake locks are expensive. Sustained CPU + network drains battery fast. |
-| **Process death** | Android kills background processes aggressively. In-memory state (buffer position, speed calculation) is lost. |
-| **Metered networks** | Users expect large downloads to pause on cellular. `ConnectivityManager` provides metered status. |
+The mobile-specific constraints are what make this hard. Android Doze mode defers network access, foreground services require visible notifications, and WorkManager has minimum 15-minute intervals. WiFi-to-cellular handoff drops TCP connections. Storage may be ejected. And Android kills background processes aggressively -- any in-memory state (buffer position, speed calculation) is lost.
 
 ---
 
 ## UI Sketch
-
-### Key Screens
 
 ```
 ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐
@@ -121,19 +71,6 @@ Before drawing a single box, ask the interviewer these questions to bound the pr
 └──────────────────────────────────────────────┘
 ```
 
-### Download State Indicators
-
-| State | Visual | User Actions Available |
-|-------|--------|----------------------|
-| **Queued** | Clock icon, "Waiting" | Cancel, Move up in queue |
-| **Downloading** | Animated progress bar, speed + ETA | Pause, Cancel |
-| **Paused** | Static progress bar, "Paused" | Resume, Cancel |
-| **Completed** | Checkmark icon, file size | Open, Share, Delete |
-| **Failed** | Error icon, reason text | Retry, Cancel |
-| **Verifying** | Spinner, "Checking integrity..." | -- |
-
-### Navigation Flow
-
 ```mermaid
 flowchart LR
     LIST[Download List] -->|Tap item| DETAIL[Download Detail]
@@ -151,17 +88,14 @@ flowchart LR
 
 ### Protocol Choice: HTTP with Range Requests
 
-A download manager's primary interaction with the server is fetching bytes. The protocol decision is straightforward but the details matter.
+A download manager's primary interaction with the server is fetching bytes. I'd use **HTTP/1.1 or HTTP/2 with Range requests** -- every CDN, every cloud storage provider, and every file server supports this. The Range header is the foundation of resumable downloads.
 
-| Protocol | Fit for Download Manager | Why / Why Not |
-|----------|------------------------|---------------|
+| Protocol | Fit | Why / Why Not |
+|----------|-----|---------------|
 | **HTTP/1.1 + Range** | Best fit | Universal server support, resumable via `Range` header, well-understood caching (ETag, Last-Modified) |
 | **HTTP/2** | Excellent | Multiplexing allows multiple chunk streams over one connection, header compression reduces overhead |
-| **gRPC streaming** | Overkill | Adds protobuf overhead for raw byte transfer. No browser/CDN ecosystem support for file serving |
+| **gRPC streaming** | Overkill | Adds protobuf overhead for raw byte transfer. No CDN ecosystem support for file serving |
 | **WebSocket** | Wrong tool | Designed for bidirectional messaging, not bulk data transfer. No built-in resume semantics |
-| **FTP** | Legacy | No encryption by default, poor mobile library support, no CDN integration |
-
-**Decision: HTTP/1.1 or HTTP/2 with Range requests.** Every CDN, every cloud storage provider, and every file server supports this. The Range header is the foundation of resumable downloads.
 
 !!! tip "Pro Tip"
     In an interview, explicitly mention that you'd send a `HEAD` request first to check `Accept-Ranges: bytes` and `Content-Length`. If the server doesn't support ranges, you fall back to non-resumable download -- and you should tell the user upfront.
@@ -176,49 +110,24 @@ A download manager's primary interaction with the server is fetching bytes. The 
 | `Content-Length` | Response | Total file size (HEAD) or chunk size (ranged GET) |
 | `ETag` | Response | File version identifier -- detect if file changed since pause |
 | `If-Range` | Request | "Give me the range only if ETag still matches; otherwise send the whole file" |
-| `Content-Disposition` | Response | Suggested filename |
 
 ### Chunked vs. Single-Stream Download
 
-| Strategy | When to Use | Tradeoff |
-|----------|-------------|----------|
-| **Single stream** | Small files (< 10 MB), server doesn't support ranges | Simple, low overhead, no merge step |
-| **Multi-chunk parallel** | Large files (> 50 MB), high-bandwidth connection, CDN with range support | 2-4x faster on high-latency links, but adds merge complexity and more connections |
+I'd default to **single stream** and switch to **parallel chunks for files > 50 MB** when the server supports ranges. Single stream is simple with no merge step. Multi-chunk parallel (2-4 connections) can be 2-4x faster on high-latency links but adds merge complexity. This matches Chrome and Telegram's behavior.
 
-**Decision: Single stream by default, parallel chunks for files > 50 MB when the server supports ranges.** This matches Chrome and Telegram's behavior -- simple by default, optimized for large files.
+### Client-Side API (Download Engine Interface)
 
----
-
-## API Endpoint Design & Additional Considerations
-
-### Download Lifecycle API (Client-Side Interface)
-
-This is the internal API exposed by the download engine to the UI layer. Not a server API -- the server is just an HTTP file host.
+This is the internal API exposed by the download engine to the UI layer -- the server is just an HTTP file host.
 
 ```kotlin
 interface DownloadManager {
-    /** Enqueue a new download. Returns a unique download ID. */
     suspend fun enqueue(request: DownloadRequest): DownloadId
-
-    /** Pause an active download. Persists current byte offset. */
     suspend fun pause(id: DownloadId)
-
-    /** Resume a paused or failed download from last offset. */
     suspend fun resume(id: DownloadId)
-
-    /** Cancel and delete partial file. */
     suspend fun cancel(id: DownloadId)
-
-    /** Observe download state changes (progress, speed, state). */
     fun observe(id: DownloadId): Flow<DownloadState>
-
-    /** Observe all downloads (for the list screen). */
     fun observeAll(): Flow<List<DownloadState>>
-
-    /** Retry a failed download. */
     suspend fun retry(id: DownloadId)
-
-    /** Change priority of a queued download. */
     suspend fun setPriority(id: DownloadId, priority: Priority)
 }
 
@@ -279,20 +188,11 @@ enum class Priority { LOW, NORMAL, HIGH, URGENT }
 ```
 
 !!! warning "Edge Case"
-    If the server responds with `200 OK` instead of `206 Partial Content` to a Range request, the server does not support ranges or the file changed. You must detect this by checking the status code and restart the download, informing the user that progress was lost.
-
-### Progress Reporting Strategy
-
-| Consumer | Update Frequency | Mechanism |
-|----------|-----------------|-----------|
-| **Database** | Every 1 MB or every 5s | Batched writes to avoid I/O thrashing |
-| **UI (Flow)** | Every 500ms | Conflated `StateFlow` -- UI always gets latest, drops intermediate |
-| **Notification** | Every 2s | Android rate-limits notification updates; more frequent is wasted work |
-| **Speed calculation** | Rolling 3s window | Smooths out TCP burst/stall patterns for stable ETA |
+    If the server responds with `200 OK` instead of `206 Partial Content` to a Range request, the server does not support ranges or the file changed. Detect this by checking the status code and restart the download, informing the user that progress was lost.
 
 ---
 
-## High-Level Architecture
+## Architecture
 
 ### Component Diagram
 
@@ -340,34 +240,16 @@ graph TB
     NOTIF --> DM
 ```
 
-### Component Responsibilities
+**DownloadManager** is the public API facade -- all operations flow through it. The **Scheduler** manages concurrency limits, priority queue, and WiFi-only constraints, decoupled from the engine so policy changes don't touch download logic. The **State Machine** enforces valid transitions. The **Download Engine** performs HTTP requests and writes bytes to disk -- stateless per-download, with all persistent state in DB. The **Repository** is the single source of truth, exposing Flows for reactive UI.
 
-| Component | Responsibility | Key Design Decision |
-|-----------|---------------|-------------------|
-| **DownloadManager** | Public API facade; coordinates scheduler, state machine, and repository | Single entry point -- all operations flow through here |
-| **Download Scheduler** | Manages concurrency limits, priority queue, WiFi-only constraints | Decoupled from engine -- policy changes don't touch download logic |
-| **State Machine** | Enforces valid state transitions (queued -> downloading -> paused, etc.) | Prevents illegal transitions like paused -> completed |
-| **Download Engine** | Performs actual HTTP requests, writes bytes to disk, reports progress | Stateless per-download -- all persistent state in DB |
-| **Download Repository** | Abstracts DB access, exposes Flows for reactive UI | Single source of truth for download metadata and progress |
-| **Foreground Service** | Keeps process alive during active downloads, shows notification | Required on Android for long-running network operations |
-| **WorkManager** | Schedules download resumption after process death or reboot | Guarantees work execution even if app is killed |
-| **ConnectivityMonitor** | Observes network state changes, triggers pause/resume | Uses `ConnectivityManager.NetworkCallback` for real-time events |
+On the platform side: **Foreground Service** keeps the process alive during active downloads. **WorkManager** guarantees resumption after process death or reboot. **ConnectivityMonitor** uses `NetworkCallback` for real-time network changes.
 
-### KMP Alignment
-
-| Layer | Shared (commonMain) | Platform-Specific |
-|-------|-------------------|-------------------|
-| **Domain** | DownloadManager, Scheduler, State Machine | -- |
-| **Data** | Repository interface, Download Engine (Ktor), DB schema (SQLDelight) | File system paths, temp directory |
-| **Platform** | -- | WorkManager (Android), URLSession background tasks (iOS), Notification APIs |
-| **UI** | State models, ViewModels (with KMP-compatible ViewModel) | Compose (Android), SwiftUI (iOS) |
-
-!!! tip "Pro Tip"
-    The download engine (HTTP client + byte writing) is the most shareable component in KMP. Ktor supports Range headers on all platforms. The platform boundary is primarily background scheduling (WorkManager vs. BGProcessingTask) and notifications.
+!!! tip "Pro Tip: KMP Alignment"
+    The download engine (Ktor + byte writing) is the most shareable KMP component -- Ktor supports Range headers on all platforms. Domain layer, data layer interfaces, and DB schema (SQLDelight) all live in `commonMain`. The platform boundary is just background scheduling (WorkManager vs. BGProcessingTask), file system paths, and notification APIs.
 
 ---
 
-## Data Flow for Basic Scenarios
+## Data Flow for Key Scenarios
 
 ### Starting a New Download
 
@@ -519,15 +401,7 @@ sequenceDiagram
 
 ### Resumable Downloads (HTTP Range Headers)
 
-The core mechanism that makes a download manager useful. Without resume, every network hiccup means starting over.
-
-**How it works:**
-
-1. **Initial HEAD request** -- get `Content-Length`, `Accept-Ranges`, `ETag`
-2. **Persist metadata** -- store total size and ETag in database
-3. **On interruption** -- record `downloadedBytes` (the byte offset where we stopped)
-4. **On resume** -- send `Range: bytes={offset}-` with `If-Range: {etag}`
-5. **Validate response** -- `206` means continue; `200` means file changed, restart
+The core mechanism that makes a download manager useful. HEAD to get metadata, persist it, record byte offset on interruption, resume with `Range: bytes={offset}-` and `If-Range: {etag}`, then validate: `206` means continue, `200` means file changed so restart.
 
 ```kotlin
 suspend fun downloadWithResume(
@@ -574,13 +448,63 @@ suspend fun downloadWithResume(
 ```
 
 !!! warning "Edge Case"
-    Some servers return `Accept-Ranges: bytes` in the HEAD response but silently ignore the `Range` header in GET. Always verify the response: if you send `Range: bytes=1000-` but get a `200` with `Content-Length` equal to the full file size, the server did not honor the range. Restart the download.
+    Some servers return `Accept-Ranges: bytes` in the HEAD response but silently ignore the `Range` header in GET. Always verify: if you send `Range: bytes=1000-` but get a `200` with `Content-Length` equal to the full file size, the server did not honor the range. Restart the download.
 
-### Priority Queue Design
+### Download State Machine
 
-The scheduler decides which downloads run and in what order. This is a classic priority queue problem with real-time constraints.
+A formal state machine prevents illegal transitions and makes the system predictable.
 
-**Queue design:**
+```mermaid
+stateDiagram-v2
+    [*] --> QUEUED : enqueue()
+    QUEUED --> DOWNLOADING : slot available
+    QUEUED --> CANCELLED : cancel()
+    DOWNLOADING --> PAUSED : pause() / network lost
+    DOWNLOADING --> COMPLETED : all bytes received
+    DOWNLOADING --> FAILED : error + max retries exceeded
+    DOWNLOADING --> VERIFYING : checksum configured
+    DOWNLOADING --> CANCELLED : cancel()
+    PAUSED --> DOWNLOADING : resume() / network restored
+    PAUSED --> CANCELLED : cancel()
+    FAILED --> QUEUED : retry()
+    FAILED --> CANCELLED : cancel()
+    VERIFYING --> COMPLETED : checksum matches
+    VERIFYING --> FAILED : checksum mismatch
+    COMPLETED --> [*]
+    CANCELLED --> [*]
+```
+
+```kotlin
+class DownloadStateMachine {
+    private val validTransitions: Map<Status, Set<Status>> = mapOf(
+        Status.QUEUED to setOf(Status.DOWNLOADING, Status.CANCELLED),
+        Status.DOWNLOADING to setOf(
+            Status.PAUSED, Status.COMPLETED, Status.FAILED,
+            Status.VERIFYING, Status.CANCELLED
+        ),
+        Status.PAUSED to setOf(Status.DOWNLOADING, Status.CANCELLED),
+        Status.FAILED to setOf(Status.QUEUED, Status.CANCELLED),
+        Status.VERIFYING to setOf(Status.COMPLETED, Status.FAILED),
+    )
+
+    fun transition(current: Status, target: Status): Result<Status> {
+        val allowed = validTransitions[current] ?: return Result.failure(
+            IllegalStateException("No transitions from terminal state $current")
+        )
+        return if (target in allowed) {
+            Result.success(target)
+        } else {
+            Result.failure(
+                IllegalStateException("Invalid transition: $current → $target")
+            )
+        }
+    }
+}
+```
+
+### Priority Queue & Scheduling
+
+The scheduler decides which downloads run and in what order. I'd use **priority-based with FIFO tiebreaker** -- user-initiated downloads get `HIGH`, prefetch gets `LOW`, and the user can manually promote items to `URGENT`. Chrome uses a similar system where user-clicked downloads are high priority while prefetch is low.
 
 ```kotlin
 class DownloadScheduler(
@@ -618,31 +542,9 @@ class DownloadScheduler(
 }
 ```
 
-| Strategy | Behavior | When to Use |
-|----------|----------|-------------|
-| **FIFO** | First enqueued, first downloaded | Default for user-initiated downloads |
-| **Priority-based** | URGENT > HIGH > NORMAL > LOW, FIFO within same priority | Mix of user-initiated (HIGH) and prefetch (LOW) |
-| **Deadline-based** | Sort by expiration time | Expiring signed URLs or time-sensitive content |
-
-**Decision: Priority-based with FIFO tiebreaker.** User-initiated downloads get `HIGH`, prefetch gets `LOW`, and the user can manually promote items to `URGENT`.
-
-!!! tip "Pro Tip"
-    Chrome uses a similar priority system: user-clicked downloads are high priority, while prefetch and speculative loads are low. In an interview, mentioning this shows you've studied real-world implementations.
-
 ### Parallel Chunk Downloading
 
-For large files on high-bandwidth connections, splitting a file into chunks and downloading them simultaneously can significantly improve speed.
-
-**Why it helps:** A single TCP connection's throughput is limited by the congestion window and RTT. Multiple connections multiply the effective bandwidth, especially on high-latency links (satellite, distant CDN).
-
-**When NOT to use it:**
-
-- File < 50 MB (overhead of multiple connections outweighs benefit)
-- Server doesn't support Range requests
-- User is on cellular / metered network (don't waste multiple connections)
-- Server rate-limits per-IP connections
-
-**Chunk coordination:**
+A single TCP connection's throughput is limited by the congestion window and RTT -- multiple connections multiply effective bandwidth, especially on high-latency links. Skip parallel chunks when: file < 50 MB, server doesn't support Range, metered network, or server rate-limits per-IP.
 
 ```kotlin
 data class ChunkPlan(
@@ -669,19 +571,13 @@ suspend fun downloadParallel(
         )
     }
 
-    // Download all chunks in parallel
     val results = chunks.map { chunk ->
-        async(Dispatchers.IO) {
-            downloadChunk(url, chunk)
-        }
+        async(Dispatchers.IO) { downloadChunk(url, chunk) }
     }.awaitAll()
 
-    // Merge chunks sequentially
     outputFile.outputStream().use { out ->
         chunks.sortedBy { it.chunkIndex }.forEach { chunk ->
-            chunk.tempFile.inputStream().use { input ->
-                input.copyTo(out)
-            }
+            chunk.tempFile.inputStream().use { input -> input.copyTo(out) }
             chunk.tempFile.delete()
         }
     }
@@ -695,22 +591,17 @@ suspend fun downloadParallel(
 
 ### Background Download Service
 
-The hardest part of a mobile download manager. The OS actively fights you.
+The hardest part of a mobile download manager -- the OS actively fights you. I'd use **Foreground Service for active downloads + WorkManager for recovery after process death.**
 
-**Android execution options:**
-
-| Option | Max Duration | Survives Process Death | Network Access in Doze | Use Case |
-|--------|-------------|----------------------|----------------------|----------|
+| Option | Max Duration | Survives Death | Network in Doze | Use Case |
+|--------|-------------|----------------|-----------------|----------|
 | **Foreground Service** | Unlimited (with notification) | Yes (restarts) | Yes | Active downloads user is aware of |
-| **WorkManager** | 10 min (default), configurable | Yes (rescheduled) | Expedited work only | Resuming failed downloads, scheduled sync |
-| **DownloadManager (system)** | Unlimited | Yes (system-managed) | Yes | Simple file downloads without custom UI |
+| **WorkManager** | 10 min (configurable) | Yes (rescheduled) | Expedited only | Recovery after process death |
+| **System DownloadManager** | Unlimited | Yes (system-managed) | Yes | Simple downloads without custom UI |
 | **Coroutine in ViewModel** | While UI is alive | No | No | Never for downloads |
-
-**Decision: Foreground Service for active downloads + WorkManager for recovery after process death.**
 
 ```kotlin
 class DownloadForegroundService : Service() {
-
     private val downloadManager: DownloadManager by inject()
     private val notificationController: DownloadNotificationController by inject()
 
@@ -778,20 +669,17 @@ class DownloadRecoveryWorker(
 ```
 
 !!! warning "Edge Case"
-    On Android 12+, foreground service launch from background is restricted. You must either start the service while the app is in foreground, use `WorkManager.setExpedited()`, or declare a foreground service type (`dataSync`) in the manifest. Missing this will cause `ForegroundServiceStartNotAllowedException`.
+    On Android 12+, foreground service launch from background is restricted. You must either start the service while the app is in foreground, use `WorkManager.setExpedited()`, or declare a foreground service type (`dataSync`) in the manifest. Missing this causes `ForegroundServiceStartNotAllowedException`.
 
-### Progress Tracking and Notification Updates
+### Progress Tracking
 
-Efficient progress reporting is critical. Naive approaches either thrash the disk or starve the UI.
-
-**Multi-tier progress architecture:**
+The key insight is multi-tier update rates -- in-memory for UI (every 500ms via conflated Flow), batched DB writes (every 1 MB or 5s), and rate-limited notifications (every 2s):
 
 ```kotlin
 class ProgressTracker(
     private val repository: DownloadRepository,
     private val notificationController: DownloadNotificationController,
 ) {
-    // In-memory state -- fast, updated on every buffer read
     private val _progress = MutableStateFlow(ProgressSnapshot.EMPTY)
     val progress: StateFlow<ProgressSnapshot> = _progress.asStateFlow()
 
@@ -811,7 +699,7 @@ class ProgressTracker(
 
         // Batch DB writes: every 1 MB or 5 seconds
         if (bytesRead - lastDbWrite > 1_048_576 || now - lastDbWrite > 5_000) {
-            repository.updateProgress(bytesRead) // Non-blocking
+            repository.updateProgress(bytesRead)
             lastDbWrite = now
         }
 
@@ -829,15 +717,7 @@ class ProgressTracker(
 
 ### Storage Management
 
-File allocation and cleanup are often overlooked but critical for reliability.
-
-**Temp file strategy:**
-
-1. **Naming convention:** `{filename}.download.tmp` -- easy to identify and clean up
-2. **Pre-allocation:** On supported file systems, allocate the full file size upfront to catch disk-full early
-3. **Atomic rename:** Only rename `tmp → final` after download completes and (optionally) checksum validates
-4. **Cleanup on cancel:** Delete temp file immediately
-5. **Orphan cleanup:** On app startup, scan for `.download.tmp` files without matching DB records and delete them
+Often overlooked but critical. Temp files are named `{filename}.download.tmp`, pre-allocated to full size to catch disk-full early, atomically renamed only after completion + checksum validation, and deleted immediately on cancel. On startup, orphaned `.download.tmp` files without matching DB records are cleaned up.
 
 ```kotlin
 class StorageManager(private val context: Context) {
@@ -867,14 +747,6 @@ class StorageManager(private val context: Context) {
         }
     }
 
-    fun cleanOrphans(knownTempFiles: Set<String>) {
-        val downloadDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: return
-        downloadDir.listFiles()
-            ?.filter { it.name.endsWith(".download.tmp") }
-            ?.filter { it.name !in knownTempFiles }
-            ?.forEach { it.delete() }
-    }
-
     companion object {
         private const val SAFETY_MARGIN = 50 * 1024 * 1024L // 50 MB buffer
     }
@@ -884,53 +756,9 @@ class StorageManager(private val context: Context) {
 !!! warning "Edge Case"
     `File.renameTo()` fails silently (returns `false`) when source and destination are on different mount points -- e.g., internal storage to SD card. Always check the return value and fall back to copy + delete.
 
-### Bandwidth Throttling and WiFi-Only Modes
+### Network Constraints & Bandwidth Throttling
 
-Users on metered connections need control over download behavior.
-
-**Network constraint handling:**
-
-```kotlin
-class ConnectivityMonitor(context: Context) {
-    private val connectivityManager =
-        context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-
-    private val _networkState = MutableStateFlow(NetworkState.UNKNOWN)
-    val networkState: StateFlow<NetworkState> = _networkState.asStateFlow()
-
-    init {
-        val callback = object : ConnectivityManager.NetworkCallback() {
-            override fun onCapabilitiesChanged(
-                network: Network,
-                capabilities: NetworkCapabilities,
-            ) {
-                _networkState.value = NetworkState(
-                    isConnected = true,
-                    isUnmetered = capabilities.hasCapability(
-                        NetworkCapabilities.NET_CAPABILITY_NOT_METERED
-                    ),
-                    linkDownstreamBandwidthKbps =
-                        capabilities.linkDownstreamBandwidthKbps,
-                )
-            }
-
-            override fun onLost(network: Network) {
-                _networkState.value = NetworkState(isConnected = false)
-            }
-        }
-
-        connectivityManager.registerDefaultNetworkCallback(callback)
-    }
-}
-```
-
-**Bandwidth throttling implementation:**
-
-| Approach | How It Works | Tradeoff |
-|----------|-------------|----------|
-| **Token bucket** | Limit bytes-per-second by sleeping between reads | Simple, predictable, but blocks the coroutine |
-| **Read size limiting** | Request smaller buffer reads from the socket | Less precise but doesn't block |
-| **OkHttp Interceptor** | Wrap response body in throttled source | Clean integration with OkHttp stack |
+The `ConnectivityMonitor` uses `NetworkCallback` to track connectivity, metered status, and downstream bandwidth in real-time. WiFi-only downloads pause automatically when the network becomes metered. For bandwidth throttling, I'd use a **token bucket via an OkHttp Interceptor**:
 
 ```kotlin
 class ThrottledSource(
@@ -949,7 +777,7 @@ class ThrottledSource(
 
     private fun throttleIfNeeded() {
         val elapsed = System.nanoTime() - windowStart
-        if (elapsed >= 1_000_000_000) { // 1 second
+        if (elapsed >= 1_000_000_000) {
             bytesReadThisSecond = 0
             windowStart = System.nanoTime()
             return
@@ -965,8 +793,6 @@ class ThrottledSource(
 ```
 
 ### Integrity Verification
-
-After downloading, validate the file hasn't been corrupted in transit.
 
 ```kotlin
 suspend fun verifyChecksum(
@@ -996,72 +822,9 @@ suspend fun verifyChecksum(
 !!! tip "Pro Tip"
     Run checksum verification on `Dispatchers.IO` and show a "Verifying..." state in the UI. For a 1 GB file, SHA-256 takes 2-5 seconds on modern devices. Don't block the completion callback on this -- show completion immediately and verify in the background if speed matters more than safety.
 
-### Download State Machine
+### Retry Strategy
 
-A formal state machine prevents illegal transitions and makes the system predictable.
-
-```mermaid
-stateDiagram-v2
-    [*] --> QUEUED : enqueue()
-    QUEUED --> DOWNLOADING : slot available
-    QUEUED --> CANCELLED : cancel()
-    DOWNLOADING --> PAUSED : pause() / network lost
-    DOWNLOADING --> COMPLETED : all bytes received
-    DOWNLOADING --> FAILED : error + max retries exceeded
-    DOWNLOADING --> VERIFYING : checksum configured
-    DOWNLOADING --> CANCELLED : cancel()
-    PAUSED --> DOWNLOADING : resume() / network restored
-    PAUSED --> CANCELLED : cancel()
-    FAILED --> QUEUED : retry()
-    FAILED --> CANCELLED : cancel()
-    VERIFYING --> COMPLETED : checksum matches
-    VERIFYING --> FAILED : checksum mismatch
-    COMPLETED --> [*]
-    CANCELLED --> [*]
-```
-
-```kotlin
-class DownloadStateMachine {
-    private val validTransitions: Map<Status, Set<Status>> = mapOf(
-        Status.QUEUED to setOf(Status.DOWNLOADING, Status.CANCELLED),
-        Status.DOWNLOADING to setOf(
-            Status.PAUSED, Status.COMPLETED, Status.FAILED,
-            Status.VERIFYING, Status.CANCELLED
-        ),
-        Status.PAUSED to setOf(Status.DOWNLOADING, Status.CANCELLED),
-        Status.FAILED to setOf(Status.QUEUED, Status.CANCELLED),
-        Status.VERIFYING to setOf(Status.COMPLETED, Status.FAILED),
-    )
-
-    fun transition(current: Status, target: Status): Result<Status> {
-        val allowed = validTransitions[current] ?: return Result.failure(
-            IllegalStateException("No transitions from terminal state $current")
-        )
-        return if (target in allowed) {
-            Result.success(target)
-        } else {
-            Result.failure(
-                IllegalStateException("Invalid transition: $current → $target")
-            )
-        }
-    }
-}
-```
-
-### Retry Strategy with Exponential Backoff
-
-Not all errors deserve the same retry behavior.
-
-| Error Type | Retry? | Strategy |
-|-----------|--------|----------|
-| **Network timeout** | Yes | Exponential backoff: 1s, 2s, 4s, 8s, 16s (max 5 retries) |
-| **HTTP 429 (Too Many Requests)** | Yes | Honor `Retry-After` header, else backoff |
-| **HTTP 500/502/503** | Yes | Exponential backoff, max 3 retries |
-| **HTTP 404** | No | File not found -- permanent failure |
-| **HTTP 403** | No | Auth issue -- surface to user |
-| **Disk full** | No | Surface to user, pause all downloads |
-| **SSL/TLS error** | No | Certificate issue -- permanent failure |
-| **DNS resolution failure** | Yes | Usually transient -- retry with backoff |
+Transient errors (network timeouts, HTTP 429/5xx, DNS failures) retry with exponential backoff (1s, 2s, 4s, 8s, 16s, max 5). Permanent errors (404, 403, SSL, disk-full) surface to the user immediately.
 
 ```kotlin
 class RetryPolicy(
@@ -1088,26 +851,26 @@ sealed class RetryDecision {
 ```
 
 !!! tip "Pro Tip"
-    Always add jitter to exponential backoff. Without jitter, all clients that failed at the same time retry at the same time, creating a "thundering herd" that overwhelms the server again. This is especially relevant for CDN outages.
+    Always add jitter to exponential backoff. Without jitter, all clients that failed at the same time retry simultaneously, creating a "thundering herd" that overwhelms the server again. This is especially relevant for CDN outages.
 
 ---
 
-## Edge Cases & Decisions
+## Scalability, Reliability & Edge Cases
 
 | Scenario | Decision | Reasoning |
 |----------|----------|-----------|
-| **Server removes file mid-download** | Transition to FAILED, keep partial file for 24h | User might want to find an alternative source; auto-delete after grace period |
-| **Disk full during download** | Pause all downloads, notify user, check periodically | Don't fail permanently -- user might free space. Pause is more recoverable than fail |
-| **Download URL is a redirect chain** | Follow redirects, store final URL for resume | Some CDNs use signed redirect URLs that expire; store original URL too and re-resolve |
-| **File already exists at destination** | Append `(1)`, `(2)` suffix like Chrome | Never silently overwrite; let user choose in settings |
-| **WiFi → cellular transition mid-download** | Pause WiFi-only downloads, continue others | Respect user's data preferences; use `ConnectivityManager.NetworkCallback` for real-time detection |
-| **ETag changes between pause and resume** | Restart download from byte 0 | File content changed; partial data is now invalid. Inform user why progress was lost |
-| **Server returns wrong Content-Length** | Detect mismatch on completion, re-download if checksum fails | Some servers lie about Content-Length (gzip misconfiguration); checksum is the final arbiter |
-| **Process killed during write** | On restart, verify temp file size matches DB offset | If temp file is smaller (OS didn't flush), adjust offset downward. If larger (unlikely), truncate |
+| **Server removes file mid-download** | Transition to FAILED, keep partial file for 24h | User might find an alternative source; auto-delete after grace period |
+| **Disk full during download** | Pause all downloads, notify user, check periodically | Pause is more recoverable than fail -- user might free space |
+| **Redirect chains** | Follow redirects, store final URL for resume | Some CDNs use signed redirect URLs that expire; store original URL too and re-resolve |
+| **File already exists at destination** | Append `(1)`, `(2)` suffix like Chrome | Never silently overwrite |
+| **WiFi -> cellular mid-download** | Pause WiFi-only downloads, continue others | Respect data preferences via `ConnectivityManager.NetworkCallback` |
+| **ETag changes between pause and resume** | Restart from byte 0 | File content changed; partial data is invalid. Inform user why progress was lost |
+| **Server returns wrong Content-Length** | Detect mismatch on completion, re-download if checksum fails | Some servers lie (gzip misconfiguration); checksum is the final arbiter |
+| **Process killed during write** | On restart, verify temp file size matches DB offset | If temp file is smaller (OS didn't flush), adjust offset downward |
 | **Concurrent resume of same URL** | Deduplicate by URL, reject second enqueue | Return existing download ID; don't waste bandwidth on duplicates |
-| **VPN connects/disconnects** | Treat as network change, verify connectivity to download host | VPN changes can make previously-reachable hosts unreachable and vice versa |
-| **Device reboots mid-download** | WorkManager `BOOT_COMPLETED` triggers recovery worker | All state is in DB; recovery worker queries interrupted downloads and resumes |
-| **Signed URL expires before download completes** | Detect 403, request fresh URL from app's backend | Large files on S3/GCS use signed URLs with TTL; the app needs a "refresh URL" API |
+| **VPN connects/disconnects** | Treat as network change, verify connectivity to host | VPN changes can make hosts unreachable or newly reachable |
+| **Device reboots mid-download** | WorkManager `BOOT_COMPLETED` triggers recovery worker | All state is in DB; recovery worker queries interrupted downloads |
+| **Signed URL expires before completion** | Detect 403, request fresh URL from app's backend | Large files on S3/GCS use signed URLs with TTL; the app needs a "refresh URL" API |
 
 ---
 
@@ -1152,34 +915,19 @@ CREATE TABLE chunk_progress (
 ```
 
 !!! note
-    The `chunk_progress` table only has rows for downloads using parallel chunking. Single-stream downloads track progress entirely in the `downloads` table. This avoids unnecessary complexity for small files.
+    The `chunk_progress` table only has rows for downloads using parallel chunking. Single-stream downloads track progress entirely in the `downloads` table, avoiding unnecessary complexity for small files.
 
 ---
 
 ## Wrap Up
 
-### Key Design Decisions
+- **HTTP Range requests as the foundation** -- universal CDN support, resumable by design, no custom protocol needed. ETag validation on resume detects server-side file changes.
+- **Foreground Service + WorkManager** -- foreground service keeps the process alive for active downloads; WorkManager guarantees recovery after process death or reboot.
+- **Priority queue with concurrency limit** -- prevents bandwidth starvation while giving users control. Parallel chunks only for files > 50 MB.
+- **Batched progress persistence** -- writing every byte offset to DB would thrash I/O; 1 MB / 5s batching balances durability and performance. Multi-tier updates: in-memory for UI, batched for DB, rate-limited for notifications.
+- **Atomic temp-file-then-rename** -- prevents corrupted partial files from appearing as "completed"; downstream consumers never see incomplete data.
 
-| Decision | Why |
-|----------|-----|
-| **HTTP Range requests as the foundation** | Universal CDN support, resumable by design, no custom protocol needed |
-| **Foreground Service + WorkManager** | Foreground service for active downloads (keeps process alive); WorkManager for recovery after death |
-| **Priority queue with concurrency limit** | Prevents bandwidth starvation; gives user control without overwhelming the device |
-| **Batched progress persistence** | Writing every byte offset to DB would thrash I/O; 1 MB / 5s batching balances durability and performance |
-| **Parallel chunks only for large files** | Complexity isn't justified for small files; 50 MB threshold matches real-world CDN behavior |
-| **Atomic temp-file-then-rename** | Prevents corrupted partial files from appearing as "completed"; downstream consumers never see incomplete data |
-| **State machine for download lifecycle** | Prevents illegal transitions, makes debugging deterministic, simplifies UI state mapping |
-| **ETag validation on resume** | Detects server-side file changes; prevents corrupted downloads from mismatched byte ranges |
-
-### What I'd Improve With More Time
-
-- **Multi-source downloads** -- Download different chunks from different CDN edges or mirrors for maximum throughput
-- **Predictive scheduling** -- Use historical speed data to estimate completion times and schedule WiFi-only downloads for when the user is typically on WiFi
-- **Adaptive chunk sizing** -- Dynamically adjust chunk count based on measured bandwidth and server response time
-- **Compression-aware downloading** -- Handle `Content-Encoding: gzip` correctly (compressed size != decompressed size breaks Range math)
-- **Download groups** -- Allow grouping related downloads (e.g., "Season 3 episodes") with group-level pause/resume/priority
-- **Peer-to-peer assist** -- For app-specific content (like Telegram does), download from nearby peers on the same WiFi
-- **Detailed analytics** -- Track per-server reliability, average speed by time of day, retry success rates to optimize scheduling
+**What I'd improve with more time:** Multi-source downloads from different CDN edges for maximum throughput, adaptive chunk sizing based on measured bandwidth, predictive scheduling using historical speed data, compression-aware downloading (`Content-Encoding: gzip` breaks Range math), download groups with group-level pause/resume, and peer-to-peer assist for app-specific content.
 
 ---
 
@@ -1192,6 +940,5 @@ CREATE TABLE chunk_progress (
 - [OkHttp](https://square.github.io/okhttp/) -- HTTP client with interceptor chain, connection pooling, transparent compression
 - [Ktor Client](https://ktor.io/docs/client.html) -- KMP-compatible HTTP client with streaming support
 - [PRDownloader](https://github.com/MindorksOpenSource/PRDownloader) -- Open-source Android download manager library; good reference implementation
-- [Ketch](https://github.com/nichenqin/ketch) -- Kotlin-first Android download manager using WorkManager
 - [Telegram Source (TDLib)](https://github.com/tdlib/td) -- Telegram's download engine handles chunked parallel downloads across data centers
 - [Chrome Download Architecture](https://chromium.googlesource.com/chromium/src/+/main/components/download/) -- Chromium's download component; multi-process, resumable, parallel
