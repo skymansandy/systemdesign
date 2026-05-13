@@ -63,6 +63,10 @@ nav:
       - social-media/video-streaming/mobile.md
     - Multimedia Feed:
       - social-media/multimedia-feed/mobile.md
+    - Reddit Comment UI:
+      - social-media/reddit-comments/mobile.md
+    - Message Expiration:
+      - social-media/message-expiration/generic.md
 
   - E-Commerce & Payments:
     - E-Commerce:
