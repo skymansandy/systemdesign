@@ -62,6 +62,7 @@ nav:
   - E-Commerce & Payments:
     - E-Commerce: e-commerce-payments/e-commerce/index.md
     - Mobile Payment: e-commerce-payments/mobile-payment/index.md
+    - Splitwise: e-commerce-payments/splitwise/index.md
     - Stock Broking: e-commerce-payments/stock-broking/index.md
     - Hotel Reservation: e-commerce-payments/hotel-reservation/index.md
 
